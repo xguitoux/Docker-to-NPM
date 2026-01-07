@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Docker Orchestrator - Service Manager</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Docker Orchestrator</h1>
+            <p class="subtitle">Self-service container deployment with automatic DNS and reverse proxy</p>
+        </header>
+
+        <div class="health-status-compact" id="healthStatus">
+            <div class="section-header-with-toggle">
+                <h3>System Status</h3>
+                <button class="toggle-btn" id="toggleSystemStatus" aria-label="Toggle system status">
+                    <span class="toggle-icon">▼</span>
+                </button>
+            </div>
+            <div id="systemStatusContent" class="collapsible-content">
+                <div class="status-grid">
+                    <div class="status-item">
+                        <span class="status-label">Docker:</span>
+                        <span class="status-value" id="dockerStatus">-</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">NPM:</span>
+                        <span class="status-value" id="npmStatus">-</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">OVH:</span>
+                        <span class="status-value" id="ovhStatus">-</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <section class="create-service-full">
+            <h2>Create DNS Record + NPM Host</h2>
+            <p class="section-description">Create a CNAME record and/or configure Nginx Proxy Manager. You handle Docker containers separately.</p>
+
+                <form id="dnsProxyForm">
+                    <div class="form-group">
+                        <label for="subdomain">Subdomain *</label>
+                        <input type="text" id="subdomain" name="subdomain" required
+                               placeholder="my-app" pattern="[a-z0-9-]+"
+                               title="Only lowercase letters, numbers, and hyphens">
+                        <small>Will create: my-app.guitou.eu</small>
+                    </div>
+
+                    <div class="form-group checkbox-group">
+                        <label>
+                            <input type="checkbox" id="createDNS" name="createDNS" checked>
+                            Create DNS CNAME record
+                        </label>
+                        <small style="margin-left: 28px;">Uncheck if DNS record already exists</small>
+                    </div>
+
+                    <div id="dnsFields">
+                        <div class="form-group">
+                            <label for="cnameTarget">CNAME Target</label>
+                            <input type="text" id="cnameTarget" name="cnameTarget"
+                                   placeholder="@ or guitou.eu" value="@">
+                            <small>CNAME points to (@ = guitou.eu, or specify another domain)</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="ttl">TTL (Time To Live)</label>
+                            <select id="ttl" name="ttl">
+                                <option value="300">5 minutes (300s)</option>
+                                <option value="600">10 minutes (600s)</option>
+                                <option value="1800">30 minutes (1800s)</option>
+                                <option value="3600" selected>1 hour (3600s) - Default</option>
+                                <option value="7200">2 hours (7200s)</option>
+                                <option value="21600">6 hours (21600s)</option>
+                                <option value="43200">12 hours (43200s)</option>
+                                <option value="86400">24 hours (86400s)</option>
+                            </select>
+                            <small>How long DNS resolvers should cache this record</small>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="targetHost">NPM Forward Host/IP *</label>
+                        <input type="text" id="targetHost" name="targetHost" required
+                               placeholder="192.168.1.100 or container-name">
+                        <small>IP address or hostname where your container/service is running</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="targetPort">Target Port *</label>
+                        <input type="number" id="targetPort" name="targetPort" required
+                               placeholder="80" min="1" max="65535">
+                        <small>Port where your application listens</small>
+                    </div>
+
+                    <div class="form-group checkbox-group">
+                        <label>
+                            <input type="checkbox" id="enableSSL" name="enableSSL" checked>
+                            Enable SSL (Let's Encrypt)
+                        </label>
+                    </div>
+
+                    <button type="submit" class="btn-primary">Create DNS + NPM Host</button>
+                </form>
+
+                <div id="createResult" class="result-message" style="display: none;"></div>
+        </section>
+
+        <div class="bottom-grid">
+            <section class="npm-hosts-section">
+                <div class="section-header-with-toggle">
+                    <div class="header-left">
+                        <h2>NPM Proxy Hosts</h2>
+                        <input type="text" id="npmHostsSearch" class="search-input" placeholder="Filter hosts...">
+                    </div>
+                    <button class="toggle-btn" id="toggleNpmHosts" aria-label="Toggle NPM hosts">
+                        <span class="toggle-icon">▼</span>
+                    </button>
+                </div>
+                <div id="npmHostsList" class="collapsible-content">
+                    <p class="loading">Loading proxy hosts...</p>
+                </div>
+            </section>
+
+            <section class="dns-records-section">
+                <div class="section-header-with-toggle">
+                    <div class="header-left">
+                        <h2>Existing DNS Records (OVH)</h2>
+                        <input type="text" id="dnsRecordsSearch" class="search-input" placeholder="Filter records...">
+                    </div>
+                    <button class="toggle-btn" id="toggleDnsRecords" aria-label="Toggle DNS records">
+                        <span class="toggle-icon">▼</span>
+                    </button>
+                </div>
+                <div id="dnsRecordsList" class="collapsible-content">
+                    <p class="loading">Loading DNS records...</p>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

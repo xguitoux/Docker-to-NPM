@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  orchestrator-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: orchestrator-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./backend:/app/backend
+      - ./orchestrator.db:/app/orchestrator.db
+    env_file:
+      - .env
+    networks:
+      - orchestrator-net
+
+  orchestrator-frontend:
+    image: nginx:alpine
+    container_name: orchestrator-frontend
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - orchestrator-backend
+    networks:
+      - orchestrator-net
+
+networks:
+  orchestrator-net:
+    driver: bridge

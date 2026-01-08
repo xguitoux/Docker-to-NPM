@@ -114,7 +114,7 @@ Docker-to-NPM/
 
 ```bash
 # Clone and setup
-git clone <repository-url>
+git clone https://github.com/xguitoux/Docker-to-NPM
 cd Docker-to-NPM
 cp .env.example .env
 

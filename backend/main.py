@@ -420,6 +420,44 @@ async def delete_service(service_name: str, db: Session = Depends(get_db)):
     }
 
 
+@app.delete("/api/dns/records/{record_id}")
+async def delete_dns_record(record_id: int):
+    """Delete a DNS record from OVH"""
+    try:
+        success = ovh_service.delete_record(record_id)
+        if success:
+            return {
+                "success": True,
+                "message": f"DNS record {record_id} deleted successfully"
+            }
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to delete DNS record"
+            )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/npm/hosts/{proxy_host_id}")
+async def delete_npm_host(proxy_host_id: int):
+    """Delete an NPM proxy host"""
+    try:
+        success = npm_service.delete_proxy_host(proxy_host_id)
+        if success:
+            return {
+                "success": True,
+                "message": f"NPM proxy host {proxy_host_id} deleted successfully"
+            }
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to delete NPM proxy host"
+            )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

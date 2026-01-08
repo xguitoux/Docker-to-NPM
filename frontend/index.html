@@ -11,6 +11,9 @@
         <header>
             <h1>Docker Orchestrator</h1>
             <p class="subtitle">Self-service container deployment with automatic DNS and reverse proxy</p>
+            <div class="theme-toggle" id="themeToggle" title="Toggle dark/light mode">
+                <div class="theme-toggle-slider">☀️</div>
+            </div>
         </header>
 
         <div class="health-status-compact" id="healthStatus">
@@ -42,6 +45,10 @@
             <h2>Create DNS Record + NPM Host</h2>
             <p class="section-description">Create a CNAME record and/or configure Nginx Proxy Manager. You handle Docker containers separately.</p>
 
+            <div class="form-validation-hint" id="formValidationHint">
+                ℹ️ All fields must be validated before you can create. The button will be enabled once all validations pass.
+            </div>
+
                 <form id="dnsProxyForm">
                     <div class="form-group">
                         <label for="subdomain">Subdomain *</label>
@@ -49,6 +56,7 @@
                                placeholder="my-app" pattern="[a-z0-9-]+"
                                title="Only lowercase letters, numbers, and hyphens">
                         <small>Will create: my-app.guitou.eu</small>
+                        <div class="input-feedback" id="subdomainFeedback"></div>
                     </div>
 
                     <div class="form-group checkbox-group">
@@ -88,6 +96,7 @@
                         <input type="text" id="targetHost" name="targetHost" required
                                placeholder="192.168.1.100 or container-name">
                         <small>IP address or hostname where your container/service is running</small>
+                        <div class="input-feedback" id="targetHostFeedback"></div>
                     </div>
 
                     <div class="form-group">
@@ -95,6 +104,7 @@
                         <input type="number" id="targetPort" name="targetPort" required
                                placeholder="80" min="1" max="65535">
                         <small>Port where your application listens</small>
+                        <div class="input-feedback" id="targetPortFeedback"></div>
                     </div>
 
                     <div class="form-group checkbox-group">
@@ -140,6 +150,49 @@
                     <p class="loading">Loading DNS records...</p>
                 </div>
             </section>
+        </div>
+    </div>
+
+    <!-- Progress Modal -->
+    <div class="modal-overlay" id="progressModal">
+        <div class="progress-modal">
+            <h3>Creating DNS Record & NPM Host</h3>
+            <ul class="progress-steps" id="progressSteps">
+                <!-- Steps will be dynamically inserted here -->
+            </ul>
+            <div class="modal-actions" id="modalActions">
+                <button class="btn-modal btn-close" id="closeModal" disabled>Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div class="modal-overlay" id="deleteModal">
+        <div class="delete-modal">
+            <h3>⚠️ Confirm Deletion</h3>
+
+            <div class="delete-warning">
+                <div class="delete-warning-icon">🗑️</div>
+                <div class="delete-warning-text">
+                    This action <strong>cannot be undone</strong>. This will permanently delete:
+                </div>
+                <div class="delete-target" id="deleteTarget"></div>
+            </div>
+
+            <div class="delete-instruction">
+                Please type <strong id="deleteRequiredText"></strong> to confirm deletion:
+            </div>
+
+            <div class="delete-input-group">
+                <label for="deleteConfirmInput">Confirmation:</label>
+                <input type="text" id="deleteConfirmInput" class="delete-input"
+                       placeholder="Type here to confirm" autocomplete="off">
+            </div>
+
+            <div class="delete-actions">
+                <button class="btn-delete-cancel" id="deleteCancelBtn">Cancel</button>
+                <button class="btn-delete-confirm" id="deleteConfirmBtn" disabled>Delete Permanently</button>
+            </div>
         </div>
     </div>
 

@@ -11,8 +11,13 @@
         <header>
             <h1>Docker Orchestrator</h1>
             <p class="subtitle">Self-service container deployment with automatic DNS and reverse proxy</p>
-            <div class="theme-toggle" id="themeToggle" title="Toggle dark/light mode">
-                <div class="theme-toggle-slider">☀️</div>
+            <div class="header-actions">
+                <button class="admin-btn" id="adminBtn" title="Admin Settings">
+                    ⚙️ Admin
+                </button>
+                <div class="theme-toggle" id="themeToggle" title="Toggle dark/light mode">
+                    <div class="theme-toggle-slider">☀️</div>
+                </div>
             </div>
         </header>
 
@@ -34,7 +39,7 @@
                         <span class="status-value" id="npmStatus">-</span>
                     </div>
                     <div class="status-item">
-                        <span class="status-label">OVH:</span>
+                        <span class="status-label" id="dnsProviderLabel">DNS Provider:</span>
                         <span class="status-value" id="ovhStatus">-</span>
                     </div>
                 </div>
@@ -193,6 +198,217 @@
                 <button class="btn-delete-cancel" id="deleteCancelBtn">Cancel</button>
                 <button class="btn-delete-confirm" id="deleteConfirmBtn" disabled>Delete Permanently</button>
             </div>
+        </div>
+    </div>
+
+    <!-- Admin Settings Modal -->
+    <div class="modal-overlay" id="adminModal">
+        <div class="admin-modal">
+            <h3>⚙️ Admin Settings</h3>
+            <p class="admin-description">Manage NPM and DNS provider configuration</p>
+
+            <!-- Tabs -->
+            <div class="admin-tabs">
+                <button class="admin-tab active" data-tab="npm">NPM Configuration</button>
+                <button class="admin-tab" data-tab="dns">DNS Provider</button>
+            </div>
+
+            <!-- NPM Configuration Tab -->
+            <form id="adminNpmForm" class="admin-tab-content active">
+                <div class="admin-section">
+                    <h4>Nginx Proxy Manager</h4>
+
+                    <div class="form-group">
+                        <label for="adminNpmUrl">NPM API URL *</label>
+                        <input type="text" id="adminNpmUrl" name="npm_url" required
+                               placeholder="http://192.168.1.100:81">
+                        <small>NPM API endpoint (typically port 81)</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="adminNpmEmail">NPM Admin Email *</label>
+                        <input type="email" id="adminNpmEmail" name="npm_email" required
+                               placeholder="admin@example.com">
+                        <small>Email used to log into NPM</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="adminNpmPassword">NPM Admin Password</label>
+                        <input type="password" id="adminNpmPassword" name="npm_password"
+                               placeholder="Leave empty to keep current password">
+                        <small>Leave empty to keep the current password</small>
+                        <div class="password-toggle">
+                            <input type="checkbox" id="showNpmPassword">
+                            <label for="showNpmPassword">Show password</label>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="adminNpmFeedback" class="admin-feedback" style="display: none;"></div>
+
+                <div class="admin-actions">
+                    <button type="button" class="btn-admin-cancel" id="adminNpmCancelBtn">Cancel</button>
+                    <button type="submit" class="btn-admin-save" id="adminNpmSaveBtn">Save NPM Config</button>
+                </div>
+            </form>
+
+            <!-- DNS Configuration Tab -->
+            <form id="adminDnsForm" class="admin-tab-content">
+                <div class="admin-section">
+                    <h4>DNS Provider Selection</h4>
+
+                    <div class="form-group">
+                        <label for="dnsProvider">DNS Provider *</label>
+                        <select id="dnsProvider" name="dns_provider" required>
+                            <option value="ovh">OVH</option>
+                            <option value="cloudflare">Cloudflare</option>
+                        </select>
+                        <small>Select your DNS provider</small>
+                    </div>
+                </div>
+
+                <!-- OVH Configuration -->
+                <div class="admin-section dns-provider-section" id="ovhSection">
+                    <h4>OVH API Configuration</h4>
+
+                    <div class="form-group">
+                        <label for="ovhEndpoint">OVH Endpoint</label>
+                        <select id="ovhEndpoint" name="ovh_endpoint">
+                            <option value="ovh-eu">Europe (ovh-eu)</option>
+                            <option value="ovh-ca">Canada (ovh-ca)</option>
+                            <option value="ovh-us">USA (ovh-us)</option>
+                        </select>
+                        <small>OVH API endpoint region</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="ovhAppKey">Application Key</label>
+                        <input type="text" id="ovhAppKey" name="ovh_application_key"
+                               placeholder="Leave empty to keep current">
+                        <small>OVH API application key</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="ovhAppSecret">Application Secret</label>
+                        <input type="password" id="ovhAppSecret" name="ovh_application_secret"
+                               placeholder="Leave empty to keep current">
+                        <div class="password-toggle">
+                            <input type="checkbox" id="showOvhSecret">
+                            <label for="showOvhSecret">Show secret</label>
+                        </div>
+                        <small>OVH API application secret</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="ovhConsumerKey">Consumer Key</label>
+                        <input type="password" id="ovhConsumerKey" name="ovh_consumer_key"
+                               placeholder="Leave empty to keep current">
+                        <div class="password-toggle">
+                            <input type="checkbox" id="showOvhConsumer">
+                            <label for="showOvhConsumer">Show key</label>
+                        </div>
+                        <small>OVH API consumer key</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="ovhZoneName">Zone Name</label>
+                        <input type="text" id="ovhZoneName" name="ovh_zone_name"
+                               placeholder="example.com">
+                        <small>Your domain name managed by OVH</small>
+                    </div>
+
+                    <div class="info-box" id="ovhHelpBox">
+                        <strong>📋 How to get OVH API credentials:</strong><br>
+                        <ol style="margin: 10px 0 10px 20px; padding: 0;">
+                            <li>Enter your domain name in "Zone Name" field above</li>
+                            <li id="ovhStep2" style="display: none;">
+                                Click here to generate credentials:
+                                <a href="#" id="ovhCredentialsLink" target="_blank" style="font-weight: bold;">
+                                    Generate OVH API Token →
+                                </a>
+                            </li>
+                            <li id="ovhStep3" style="display: none;">
+                                On the OVH page, the required permissions will be pre-filled:
+                                <ul style="margin: 5px 0 5px 20px;">
+                                    <li><code>GET /domain/zone/{zone}/*</code></li>
+                                    <li><code>POST /domain/zone/{zone}/*</code></li>
+                                    <li><code>DELETE /domain/zone/{zone}/*</code></li>
+                                </ul>
+                            </li>
+                            <li id="ovhStep4" style="display: none;">Set a validity period (unlimited or custom)</li>
+                            <li id="ovhStep5" style="display: none;">Click "Create keys" and copy the 3 credentials generated</li>
+                            <li id="ovhStep6" style="display: none;">Paste them in the fields above (Application Key, Application Secret, Consumer Key)</li>
+                        </ol>
+                        <div id="ovhNoZone" style="margin-top: 5px;">
+                            <em>→ Start by entering your domain name above</em>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Cloudflare Configuration -->
+                <div class="admin-section dns-provider-section" id="cloudflareSection" style="display: none;">
+                    <h4>Cloudflare API Configuration</h4>
+
+                    <div class="form-group">
+                        <label for="cloudflareToken">API Token</label>
+                        <input type="password" id="cloudflareToken" name="cloudflare_api_token"
+                               placeholder="Leave empty to keep current">
+                        <div class="password-toggle">
+                            <input type="checkbox" id="showCloudflareToken">
+                            <label for="showCloudflareToken">Show token</label>
+                        </div>
+                        <small>Cloudflare API token with DNS edit permissions</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="cloudflareZoneId">Zone ID</label>
+                        <input type="text" id="cloudflareZoneId" name="cloudflare_zone_id"
+                               placeholder="abc123def456...">
+                        <small>Your Cloudflare zone ID</small>
+                    </div>
+
+                    <div class="info-box">
+                        <strong>📋 How to get Cloudflare credentials:</strong><br>
+                        <ol style="margin: 10px 0 10px 20px; padding: 0;">
+                            <li>
+                                Go to <a href="https://dash.cloudflare.com/" target="_blank" style="font-weight: bold;">Cloudflare Dashboard</a>
+                            </li>
+                            <li>
+                                Select your domain from the list
+                            </li>
+                            <li>
+                                <strong>Get Zone ID:</strong>
+                                <ul style="margin: 5px 0 5px 20px;">
+                                    <li>On the overview page, scroll down to the right sidebar</li>
+                                    <li>Find "Zone ID" in the API section</li>
+                                    <li>Click to copy and paste it above</li>
+                                </ul>
+                            </li>
+                            <li>
+                                <strong>Create API Token:</strong>
+                                <ul style="margin: 5px 0 5px 20px;">
+                                    <li>Go to <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank">Profile → API Tokens</a></li>
+                                    <li>Click "Create Token"</li>
+                                    <li>Use the "Edit zone DNS" template</li>
+                                    <li>Select your specific zone or all zones</li>
+                                    <li>Click "Continue to summary" then "Create Token"</li>
+                                    <li>Copy the token and paste it above (⚠️ shown only once!)</li>
+                                </ul>
+                            </li>
+                        </ol>
+                        <div style="margin-top: 10px; padding: 8px; background: rgba(255, 193, 7, 0.1); border-left: 3px solid #ffc107; border-radius: 4px;">
+                            <strong>⚠️ Important:</strong> The API token is shown only once. Save it securely!
+                        </div>
+                    </div>
+                </div>
+
+                <div id="adminDnsFeedback" class="admin-feedback" style="display: none;"></div>
+
+                <div class="admin-actions">
+                    <button type="button" class="btn-admin-cancel" id="adminDnsCancelBtn">Cancel</button>
+                    <button type="submit" class="btn-admin-save" id="adminDnsSaveBtn">Save DNS Config</button>
+                </div>
+            </form>
         </div>
     </div>
 

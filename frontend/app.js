@@ -11,6 +11,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setupToggleButtons();
     setupInputValidation();
     setupDeleteModal();
+    setupAdminModal();
 
     // Refresh NPM hosts and DNS records every 30 seconds
     setInterval(() => {
@@ -644,11 +645,30 @@ async function checkHealth() {
         updateStatusIndicator('dockerStatus', data.docker, data.docker_error);
         updateStatusIndicator('npmStatus', data.npm, data.npm_error);
         updateStatusIndicator('ovhStatus', data.ovh, data.ovh_error);
+
+        // Load and display DNS provider
+        loadDNSProviderLabel();
     } catch (error) {
         console.error('Health check failed:', error);
         updateStatusIndicator('dockerStatus', false, 'Cannot reach API');
         updateStatusIndicator('npmStatus', false, 'Cannot reach API');
         updateStatusIndicator('ovhStatus', false, 'Cannot reach API');
+    }
+}
+
+async function loadDNSProviderLabel() {
+    try {
+        const response = await fetch(`${API_URL}/api/admin/dns-config`);
+        if (response.ok) {
+            const config = await response.json();
+            const label = document.getElementById('dnsProviderLabel');
+            if (label) {
+                const providerName = config.dns_provider.toUpperCase();
+                label.textContent = `DNS Provider (${providerName}):`;
+            }
+        }
+    } catch (error) {
+        console.error('Error loading DNS provider label:', error);
     }
 }
 
@@ -816,6 +836,7 @@ function setupFormHandler() {
 
         // Prepare form data
         const formData = new FormData(form);
+
         const data = {
             subdomain: formData.get('subdomain'),
             create_dns: formData.get('createDNS') === 'on',
@@ -1114,5 +1135,344 @@ async function loadDNSRecords() {
     } catch (error) {
         console.error('Failed to load DNS records:', error);
         dnsContainer.innerHTML = '<p class="error">Failed to load DNS records. Make sure OVH API is configured correctly.</p>';
+    }
+}
+
+// Setup admin settings modal
+function setupAdminModal() {
+    const adminBtn = document.getElementById('adminBtn');
+    const adminModal = document.getElementById('adminModal');
+
+    // Tab management
+    const tabs = document.querySelectorAll('.admin-tab');
+    const tabContents = document.querySelectorAll('.admin-tab-content');
+
+    tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            const tabName = tab.dataset.tab;
+
+            // Update active tab
+            tabs.forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+
+            // Update active content
+            tabContents.forEach(content => {
+                content.classList.remove('active');
+            });
+            document.getElementById(`admin${tabName.charAt(0).toUpperCase() + tabName.slice(1)}Form`).classList.add('active');
+        });
+    });
+
+    // Open admin modal
+    if (adminBtn) {
+        adminBtn.addEventListener('click', async () => {
+            await loadAdminConfigs();
+            adminModal.classList.add('active');
+        });
+    }
+
+    // Close modal on overlay click
+    if (adminModal) {
+        adminModal.addEventListener('click', (e) => {
+            if (e.target === adminModal) {
+                adminModal.classList.remove('active');
+            }
+        });
+    }
+
+    // Setup NPM form
+    setupNpmAdminForm();
+
+    // Setup DNS form
+    setupDnsAdminForm();
+}
+
+async function loadAdminConfigs() {
+    // Load NPM config
+    try {
+        const response = await fetch(`${API_URL}/api/admin/npm-config`);
+        if (response.ok) {
+            const config = await response.json();
+            document.getElementById('adminNpmUrl').value = config.npm_url;
+            document.getElementById('adminNpmEmail').value = config.npm_email;
+            document.getElementById('adminNpmPassword').value = '';
+            document.getElementById('adminNpmPassword').placeholder = config.npm_password_masked;
+        }
+    } catch (error) {
+        console.error('Error loading NPM config:', error);
+    }
+
+    // Load DNS config
+    try {
+        const response = await fetch(`${API_URL}/api/admin/dns-config`);
+        if (response.ok) {
+            const config = await response.json();
+
+            // Set provider
+            document.getElementById('dnsProvider').value = config.dns_provider;
+
+            // OVH fields
+            document.getElementById('ovhEndpoint').value = config.ovh_endpoint;
+            document.getElementById('ovhAppKey').value = config.ovh_application_key || '';
+            document.getElementById('ovhAppKey').placeholder = config.ovh_application_key_masked || 'Enter application key';
+            document.getElementById('ovhAppSecret').value = '';
+            document.getElementById('ovhAppSecret').placeholder = config.ovh_application_secret_masked || 'Enter application secret';
+            document.getElementById('ovhConsumerKey').value = '';
+            document.getElementById('ovhConsumerKey').placeholder = config.ovh_consumer_key_masked || 'Enter consumer key';
+            document.getElementById('ovhZoneName').value = config.ovh_zone_name || '';
+
+            // Cloudflare fields
+            document.getElementById('cloudflareToken').value = '';
+            document.getElementById('cloudflareToken').placeholder = config.cloudflare_api_token_masked || 'Enter API token';
+            document.getElementById('cloudflareZoneId').value = config.cloudflare_zone_id || '';
+
+            // Toggle sections
+            toggleDnsProviderSections(config.dns_provider);
+
+            // Trigger OVH credentials link update
+            const ovhZoneNameInput = document.getElementById('ovhZoneName');
+            if (ovhZoneNameInput) {
+                ovhZoneNameInput.dispatchEvent(new Event('input'));
+            }
+        }
+    } catch (error) {
+        console.error('Error loading DNS config:', error);
+    }
+}
+
+function setupNpmAdminForm() {
+    const adminNpmForm = document.getElementById('adminNpmForm');
+    const adminNpmCancelBtn = document.getElementById('adminNpmCancelBtn');
+    const adminNpmSaveBtn = document.getElementById('adminNpmSaveBtn');
+    const adminNpmFeedback = document.getElementById('adminNpmFeedback');
+    const showNpmPassword = document.getElementById('showNpmPassword');
+    const adminNpmPassword = document.getElementById('adminNpmPassword');
+    const adminModal = document.getElementById('adminModal');
+
+    // Toggle password visibility
+    if (showNpmPassword && adminNpmPassword) {
+        showNpmPassword.addEventListener('change', () => {
+            adminNpmPassword.type = showNpmPassword.checked ? 'text' : 'password';
+        });
+    }
+
+    // Cancel button
+    if (adminNpmCancelBtn) {
+        adminNpmCancelBtn.addEventListener('click', () => {
+            adminModal.classList.remove('active');
+        });
+    }
+
+    // Form submission
+    if (adminNpmForm) {
+        adminNpmForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            adminNpmSaveBtn.disabled = true;
+            adminNpmSaveBtn.textContent = 'Saving...';
+            adminNpmFeedback.style.display = 'none';
+
+            try {
+                const data = {
+                    npm_url: document.getElementById('adminNpmUrl').value.trim(),
+                    npm_email: document.getElementById('adminNpmEmail').value.trim(),
+                    npm_password: document.getElementById('adminNpmPassword').value || null
+                };
+
+                const response = await fetch(`${API_URL}/api/admin/npm-config`, {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+
+                if (response.ok && result.success) {
+                    adminNpmFeedback.className = 'admin-feedback success';
+                    adminNpmFeedback.textContent = result.message;
+                    adminNpmFeedback.style.display = 'block';
+
+                    setTimeout(() => {
+                        adminModal.classList.remove('active');
+                        checkHealth();
+                    }, 1500);
+                } else {
+                    adminNpmFeedback.className = 'admin-feedback error';
+                    adminNpmFeedback.textContent = result.message || 'Failed to update NPM configuration';
+                    adminNpmFeedback.style.display = 'block';
+                }
+            } catch (error) {
+                adminNpmFeedback.className = 'admin-feedback error';
+                adminNpmFeedback.textContent = 'Network error: ' + error.message;
+                adminNpmFeedback.style.display = 'block';
+            } finally {
+                adminNpmSaveBtn.disabled = false;
+                adminNpmSaveBtn.textContent = 'Save NPM Config';
+            }
+        });
+    }
+}
+
+function setupDnsAdminForm() {
+    const adminDnsForm = document.getElementById('adminDnsForm');
+    const adminDnsCancelBtn = document.getElementById('adminDnsCancelBtn');
+    const adminDnsSaveBtn = document.getElementById('adminDnsSaveBtn');
+    const adminDnsFeedback = document.getElementById('adminDnsFeedback');
+    const dnsProvider = document.getElementById('dnsProvider');
+    const adminModal = document.getElementById('adminModal');
+
+    // Provider change handler
+    if (dnsProvider) {
+        dnsProvider.addEventListener('change', () => {
+            toggleDnsProviderSections(dnsProvider.value);
+        });
+    }
+
+    // Password toggles
+    setupPasswordToggle('showOvhSecret', 'ovhAppSecret');
+    setupPasswordToggle('showOvhConsumer', 'ovhConsumerKey');
+    setupPasswordToggle('showCloudflareToken', 'cloudflareToken');
+
+    // OVH Zone Name input listener - Generate dynamic credentials link
+    const ovhZoneNameInput = document.getElementById('ovhZoneName');
+    const ovhEndpointSelect = document.getElementById('ovhEndpoint');
+    if (ovhZoneNameInput) {
+        const updateOvhCredentialsLink = () => {
+            const zoneName = ovhZoneNameInput.value.trim();
+            const endpoint = ovhEndpointSelect ? ovhEndpointSelect.value : 'ovh-eu';
+
+            if (zoneName) {
+                // Show all steps
+                document.getElementById('ovhStep2').style.display = 'list-item';
+                document.getElementById('ovhStep3').style.display = 'list-item';
+                document.getElementById('ovhStep4').style.display = 'list-item';
+                document.getElementById('ovhStep5').style.display = 'list-item';
+                document.getElementById('ovhStep6').style.display = 'list-item';
+                document.getElementById('ovhNoZone').style.display = 'none';
+
+                // Generate OVH credentials link with pre-filled permissions
+                const rights = [
+                    `GET /domain/zone/${zoneName}/*`,
+                    `POST /domain/zone/${zoneName}/*`,
+                    `DELETE /domain/zone/${zoneName}/*`
+                ];
+
+                const ovhLink = document.getElementById('ovhCredentialsLink');
+                const baseUrl = 'https://api.ovh.com/createToken/';
+                const params = new URLSearchParams();
+                params.append('GET', `/domain/zone/${zoneName}/*`);
+                params.append('POST', `/domain/zone/${zoneName}/*`);
+                params.append('DELETE', `/domain/zone/${zoneName}/*`);
+
+                ovhLink.href = `${baseUrl}?${params.toString()}`;
+                ovhLink.textContent = `Generate OVH API Token for ${zoneName} →`;
+            } else {
+                // Hide steps if no zone name
+                document.getElementById('ovhStep2').style.display = 'none';
+                document.getElementById('ovhStep3').style.display = 'none';
+                document.getElementById('ovhStep4').style.display = 'none';
+                document.getElementById('ovhStep5').style.display = 'none';
+                document.getElementById('ovhStep6').style.display = 'none';
+                document.getElementById('ovhNoZone').style.display = 'block';
+            }
+        };
+
+        ovhZoneNameInput.addEventListener('input', updateOvhCredentialsLink);
+        if (ovhEndpointSelect) {
+            ovhEndpointSelect.addEventListener('change', updateOvhCredentialsLink);
+        }
+
+        // Initial update on page load
+        updateOvhCredentialsLink();
+    }
+
+    // Cancel button
+    if (adminDnsCancelBtn) {
+        adminDnsCancelBtn.addEventListener('click', () => {
+            adminModal.classList.remove('active');
+        });
+    }
+
+    // Form submission
+    if (adminDnsForm) {
+        adminDnsForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            adminDnsSaveBtn.disabled = true;
+            adminDnsSaveBtn.textContent = 'Saving...';
+            adminDnsFeedback.style.display = 'none';
+
+            try {
+                const provider = document.getElementById('dnsProvider').value;
+                const data = {
+                    dns_provider: provider
+                };
+
+                if (provider === 'ovh') {
+                    data.ovh_endpoint = document.getElementById('ovhEndpoint').value;
+                    data.ovh_application_key = document.getElementById('ovhAppKey').value || null;
+                    data.ovh_application_secret = document.getElementById('ovhAppSecret').value || null;
+                    data.ovh_consumer_key = document.getElementById('ovhConsumerKey').value || null;
+                    data.ovh_zone_name = document.getElementById('ovhZoneName').value || null;
+                } else {
+                    data.cloudflare_api_token = document.getElementById('cloudflareToken').value || null;
+                    data.cloudflare_zone_id = document.getElementById('cloudflareZoneId').value || null;
+                }
+
+                const response = await fetch(`${API_URL}/api/admin/dns-config`, {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+
+                if (response.ok && result.success) {
+                    adminDnsFeedback.className = 'admin-feedback success';
+                    adminDnsFeedback.textContent = result.message;
+                    adminDnsFeedback.style.display = 'block';
+
+                    setTimeout(() => {
+                        adminModal.classList.remove('active');
+                        checkHealth(); // Reload health check and DNS provider label
+                    }, 1500);
+                } else {
+                    adminDnsFeedback.className = 'admin-feedback error';
+                    adminDnsFeedback.textContent = result.message || 'Failed to update DNS configuration';
+                    adminDnsFeedback.style.display = 'block';
+                }
+            } catch (error) {
+                adminDnsFeedback.className = 'admin-feedback error';
+                adminDnsFeedback.textContent = 'Network error: ' + error.message;
+                adminDnsFeedback.style.display = 'block';
+            } finally {
+                adminDnsSaveBtn.disabled = false;
+                adminDnsSaveBtn.textContent = 'Save DNS Config';
+            }
+        });
+    }
+}
+
+function toggleDnsProviderSections(provider) {
+    const ovhSection = document.getElementById('ovhSection');
+    const cloudflareSection = document.getElementById('cloudflareSection');
+
+    if (provider === 'cloudflare') {
+        ovhSection.style.display = 'none';
+        cloudflareSection.style.display = 'block';
+    } else {
+        ovhSection.style.display = 'block';
+        cloudflareSection.style.display = 'none';
+    }
+}
+
+function setupPasswordToggle(checkboxId, inputId) {
+    const checkbox = document.getElementById(checkboxId);
+    const input = document.getElementById(inputId);
+
+    if (checkbox && input) {
+        checkbox.addEventListener('change', () => {
+            input.type = checkbox.checked ? 'text' : 'password';
+        });
     }
 }

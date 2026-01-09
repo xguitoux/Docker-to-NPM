@@ -9,12 +9,19 @@ ENV_FILE = BASE_DIR / ".env"
 
 
 class Settings(BaseSettings):
+    # DNS Provider Configuration
+    dns_provider: str = "ovh"  # "ovh" or "cloudflare"
+
     # OVH API Configuration
     ovh_endpoint: str = "ovh-eu"
-    ovh_application_key: str
-    ovh_application_secret: str
-    ovh_consumer_key: str
-    ovh_zone_name: str
+    ovh_application_key: str = ""
+    ovh_application_secret: str = ""
+    ovh_consumer_key: str = ""
+    ovh_zone_name: str = ""
+
+    # Cloudflare API Configuration
+    cloudflare_api_token: str = ""
+    cloudflare_zone_id: str = ""
 
     # Nginx Proxy Manager Configuration
     npm_url: str

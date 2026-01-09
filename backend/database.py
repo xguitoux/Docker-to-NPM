@@ -46,6 +46,38 @@ class Subnet(Base):
     allocated_at = Column(DateTime, default=datetime.utcnow)
 
 
+class NPMConfig(Base):
+    """NPM configuration stored in database"""
+    __tablename__ = "npm_config"
+
+    id = Column(Integer, primary_key=True, index=True)
+    npm_url = Column(String, nullable=False)
+    npm_email = Column(String, nullable=False)
+    npm_password = Column(String, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class DNSConfig(Base):
+    """DNS configuration stored in database"""
+    __tablename__ = "dns_config"
+
+    id = Column(Integer, primary_key=True, index=True)
+    dns_provider = Column(String, nullable=False, default="ovh")  # "ovh" or "cloudflare"
+
+    # OVH fields
+    ovh_endpoint = Column(String, default="ovh-eu")
+    ovh_application_key = Column(String, default="")
+    ovh_application_secret = Column(String, default="")
+    ovh_consumer_key = Column(String, default="")
+    ovh_zone_name = Column(String, default="")
+
+    # Cloudflare fields
+    cloudflare_api_token = Column(String, default="")
+    cloudflare_zone_id = Column(String, default="")
+
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 def get_db():
     """Dependency to get database session"""
     db = SessionLocal()
@@ -58,3 +90,89 @@ def get_db():
 def init_db():
     """Initialize database tables"""
     Base.metadata.create_all(bind=engine)
+
+    # Initialize default configurations from .env if they don't exist
+    db = SessionLocal()
+    try:
+        # Check if NPM config exists
+        npm_config = db.query(NPMConfig).first()
+        if not npm_config:
+            # Create default NPM config from .env
+            npm_config = NPMConfig(
+                npm_url=settings.npm_url,
+                npm_email=settings.npm_email,
+                npm_password=settings.npm_password
+            )
+            db.add(npm_config)
+
+        # Check if DNS config exists
+        dns_config = db.query(DNSConfig).first()
+        if not dns_config:
+            # Create default DNS config from .env
+            dns_config = DNSConfig(
+                dns_provider=settings.dns_provider,
+                ovh_endpoint=settings.ovh_endpoint,
+                ovh_application_key=settings.ovh_application_key,
+                ovh_application_secret=settings.ovh_application_secret,
+                ovh_consumer_key=settings.ovh_consumer_key,
+                ovh_zone_name=settings.ovh_zone_name,
+                cloudflare_api_token=settings.cloudflare_api_token,
+                cloudflare_zone_id=settings.cloudflare_zone_id
+            )
+            db.add(dns_config)
+
+        db.commit()
+    finally:
+        db.close()
+
+
+def get_npm_config():
+    """Get NPM configuration from database"""
+    db = SessionLocal()
+    try:
+        config = db.query(NPMConfig).first()
+        if not config:
+            # Fallback to settings if not in DB
+            return {
+                'npm_url': settings.npm_url,
+                'npm_email': settings.npm_email,
+                'npm_password': settings.npm_password
+            }
+        return {
+            'npm_url': config.npm_url,
+            'npm_email': config.npm_email,
+            'npm_password': config.npm_password
+        }
+    finally:
+        db.close()
+
+
+def get_dns_config():
+    """Get DNS configuration from database"""
+    db = SessionLocal()
+    try:
+        config = db.query(DNSConfig).first()
+        if not config:
+            # Fallback to settings if not in DB
+            return {
+                'dns_provider': settings.dns_provider,
+                'ovh_endpoint': settings.ovh_endpoint,
+                'ovh_application_key': settings.ovh_application_key,
+                'ovh_application_secret': settings.ovh_application_secret,
+                'ovh_consumer_key': settings.ovh_consumer_key,
+                'ovh_zone_name': settings.ovh_zone_name,
+                'cloudflare_api_token': settings.cloudflare_api_token,
+                'cloudflare_zone_id': settings.cloudflare_zone_id
+            }
+        return {
+            'dns_provider': config.dns_provider,
+            'ovh_endpoint': config.ovh_endpoint,
+            'ovh_application_key': config.ovh_application_key,
+            'ovh_application_secret': config.ovh_application_secret,
+            'ovh_consumer_key': config.ovh_consumer_key,
+            'ovh_zone_name': config.ovh_zone_name,
+            'cloudflare_api_token': config.cloudflare_api_token,
+            'cloudflare_zone_id': config.cloudflare_zone_id
+        }
+    finally:
+        db.close()

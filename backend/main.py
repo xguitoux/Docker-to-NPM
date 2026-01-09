@@ -4,26 +4,29 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from config import settings
-from database import get_db, init_db, Service
+from database import get_db, init_db, Service, get_npm_config, get_dns_config, NPMConfig, DNSConfig, SessionLocal
 from models import (
     ServiceCreateRequest,
     ServiceCreateResponse,
     ServiceInfo,
     HealthResponse,
     DNSProxyCreateRequest,
-    DNSProxyCreateResponse
+    DNSProxyCreateResponse,
+    NPMConfigResponse,
+    NPMConfigUpdateRequest,
+    ConfigUpdateResponse,
+    DNSConfigResponse,
+    DNSConfigUpdateRequest
 )
 from services import (
     DockerService,
-    NPMService,
-    OVHService,
     SubnetManager
 )
 
 # Initialize FastAPI app
 app = FastAPI(
     title="Docker Orchestrator API",
-    description="API for managing Docker containers with NPM and OVH DNS",
+    description="API for managing Docker containers with NPM and DNS (OVH/Cloudflare)",
     version="1.0.0"
 )
 
@@ -36,11 +39,66 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize services
+# Initialize infrastructure services (these don't change)
 docker_service = DockerService()
-npm_service = NPMService()
-ovh_service = OVHService()
 subnet_manager = SubnetManager(settings.subnet_pool, settings.subnet_size)
+
+
+def get_npm_service():
+    """Get NPM service with current database configuration"""
+    from services import NPMService
+    config = get_npm_config()
+
+    # Create a custom NPM service with database config
+    service = NPMService()
+    service.base_url = config['npm_url'].rstrip('/')
+    service.email = config['npm_email']
+    service.password = config['npm_password']
+    service.token = None  # Force re-authentication with new creds
+
+    return service
+
+
+def get_ovh_service():
+    """Get OVH service with current database configuration"""
+    import ovh
+    from services import OVHService
+    config = get_dns_config()
+
+    # Create OVH service with database config
+    service = OVHService()
+    service.client = ovh.Client(
+        endpoint=config['ovh_endpoint'],
+        application_key=config['ovh_application_key'],
+        application_secret=config['ovh_application_secret'],
+        consumer_key=config['ovh_consumer_key']
+    )
+    service.zone_name = config['ovh_zone_name']
+
+    return service
+
+
+def get_cloudflare_service():
+    """Get Cloudflare service with current database configuration"""
+    from services.cloudflare_service import CloudflareService
+    config = get_dns_config()
+
+    # Create Cloudflare service with database config
+    service = CloudflareService()
+    service.api_token = config['cloudflare_api_token']
+    service.zone_id = config['cloudflare_zone_id']
+
+    return service
+
+
+def get_dns_service():
+    """Get the configured DNS service (OVH or Cloudflare) from database"""
+    config = get_dns_config()
+
+    if config['dns_provider'].lower() == "cloudflare":
+        return get_cloudflare_service()
+    else:
+        return get_ovh_service()
 
 
 @app.on_event("startup")
@@ -65,64 +123,134 @@ async def root():
 async def health_check():
     """Health check endpoint"""
     docker_ok = docker_service.health_check()
+    npm_service = get_npm_service()
     npm_ok = npm_service.health_check()
-    ovh_ok = ovh_service.health_check()
+    dns_service = get_dns_service()
+    dns_ok = dns_service.health_check()
 
     return HealthResponse(
-        status="healthy" if (docker_ok and npm_ok and ovh_ok) else "degraded",
+        status="healthy" if (docker_ok and npm_ok and dns_ok) else "degraded",
         docker=docker_ok,
         npm=npm_ok,
-        ovh=ovh_ok,
+        ovh=dns_ok,
         docker_error=docker_service.last_error if not docker_ok else None,
         npm_error=npm_service.last_error if not npm_ok else None,
-        ovh_error=ovh_service.last_error if not ovh_ok else None
+        ovh_error=dns_service.last_error if not dns_ok else None
     )
 
 
 @app.get("/api/dns/records")
 async def get_dns_records():
-    """Get all DNS records from OVH"""
+    """Get all DNS records from configured DNS provider"""
     try:
-        # Get all record types
         all_records = []
+        zone_name = ""
 
-        # Get A records
-        a_record_ids = ovh_service.get_records()
-        for record_id in a_record_ids:
-            record = ovh_service.get_record_details(record_id)
-            if record:
+        # Get DNS config and determine provider
+        dns_config = get_dns_config()
+
+        if dns_config['dns_provider'].lower() == "cloudflare":
+            # Get Cloudflare service with current DB config
+            cloudflare_service = get_cloudflare_service()
+
+            # Get records from Cloudflare
+            records = cloudflare_service.get_records()
+            zone_info = cloudflare_service._get_zone_info()
+            zone_name = zone_info.get('name') if zone_info else dns_config['cloudflare_zone_id']
+
+            for record in records:
+                # Extract subdomain from full name
+                full_name = record.get('name', '')
+                if full_name.endswith(f".{zone_name}"):
+                    subdomain = full_name[:-len(f".{zone_name}")]
+                elif full_name == zone_name:
+                    subdomain = "@"
+                else:
+                    subdomain = full_name
+
                 all_records.append({
-                    "id": record_id,
-                    "type": "A",
-                    "subdomain": record.get("subDomain") or "@",
-                    "target": record.get("target"),
-                    "ttl": record.get("ttl"),
-                    "zone": record.get("zone")
+                    "id": record.get('id'),
+                    "type": record.get('type'),
+                    "subdomain": subdomain,
+                    "target": record.get('content'),
+                    "ttl": record.get('ttl'),
+                    "zone": zone_name
                 })
 
-        # Get CNAME records
-        try:
-            cname_ids = ovh_service.client.get(
-                f'/domain/zone/{settings.ovh_zone_name}/record',
-                fieldType='CNAME'
-            )
-            for record_id in cname_ids:
+            # Also get CNAME records
+            try:
+                import requests
+                response = requests.get(
+                    f"{cloudflare_service.base_url}/zones/{cloudflare_service.zone_id}/dns_records",
+                    headers=cloudflare_service._get_headers(),
+                    params={'type': 'CNAME'},
+                    timeout=10
+                )
+                if response.ok:
+                    data = response.json()
+                    if data.get('success'):
+                        for record in data.get('result', []):
+                            full_name = record.get('name', '')
+                            if full_name.endswith(f".{zone_name}"):
+                                subdomain = full_name[:-len(f".{zone_name}")]
+                            elif full_name == zone_name:
+                                subdomain = "@"
+                            else:
+                                subdomain = full_name
+
+                            all_records.append({
+                                "id": record.get('id'),
+                                "type": record.get('type'),
+                                "subdomain": subdomain,
+                                "target": record.get('content'),
+                                "ttl": record.get('ttl'),
+                                "zone": zone_name
+                            })
+            except:
+                pass
+
+        else:
+            # Get OVH service with current DB config
+            ovh_service = get_ovh_service()
+            zone_name = dns_config['ovh_zone_name']
+
+            # Get A records
+            a_record_ids = ovh_service.get_records()
+            for record_id in a_record_ids:
                 record = ovh_service.get_record_details(record_id)
                 if record:
                     all_records.append({
                         "id": record_id,
-                        "type": "CNAME",
+                        "type": "A",
                         "subdomain": record.get("subDomain") or "@",
                         "target": record.get("target"),
                         "ttl": record.get("ttl"),
                         "zone": record.get("zone")
                     })
-        except:
-            pass
+
+            # Get CNAME records
+            try:
+                cname_ids = ovh_service.client.get(
+                    f'/domain/zone/{dns_config["ovh_zone_name"]}/record',
+                    fieldType='CNAME'
+                )
+                for record_id in cname_ids:
+                    record = ovh_service.get_record_details(record_id)
+                    if record:
+                        all_records.append({
+                            "id": record_id,
+                            "type": "CNAME",
+                            "subdomain": record.get("subDomain") or "@",
+                            "target": record.get("target"),
+                            "ttl": record.get("ttl"),
+                            "zone": record.get("zone")
+                        })
+            except:
+                pass
 
         return {
             "success": True,
-            "zone": settings.ovh_zone_name,
+            "zone": zone_name,
             "count": len(all_records),
             "records": all_records
         }
@@ -143,13 +271,26 @@ async def create_dns_proxy(request: DNSProxyCreateRequest):
     errors = []
     dns_record_id = None
     npm_proxy_host_id = None
-    full_domain = f"{request.subdomain}.{settings.ovh_zone_name}"
+
+    # Get DNS service based on configured provider
+    dns_service = get_dns_service()
+
+    # Get DNS config and zone name based on provider
+    dns_config = get_dns_config()
+    if dns_config['dns_provider'].lower() == "cloudflare":
+        cloudflare_service = get_cloudflare_service()
+        zone_info = cloudflare_service._get_zone_info()
+        zone_name = zone_info.get('name') if zone_info else dns_config['cloudflare_zone_id']
+    else:
+        zone_name = dns_config['ovh_zone_name']
+
+    full_domain = f"{request.subdomain}.{zone_name}"
 
     try:
-        # Step 1: Create OVH DNS CNAME record (if requested)
+        # Step 1: Create DNS CNAME record (if requested)
         if request.create_dns:
             try:
-                dns_record_id = ovh_service.create_cname_record(
+                dns_record_id = dns_service.create_cname_record(
                     subdomain=request.subdomain,
                     target=request.cname_target,
                     ttl=request.ttl
@@ -164,6 +305,7 @@ async def create_dns_proxy(request: DNSProxyCreateRequest):
 
         # Step 2: Create NPM proxy host
         try:
+            npm_service = get_npm_service()
             npm_proxy_host_id = npm_service.create_proxy_host(
                 domain_name=full_domain,
                 forward_host=request.target_host,
@@ -201,6 +343,7 @@ async def create_dns_proxy(request: DNSProxyCreateRequest):
 async def get_npm_hosts():
     """Get all NPM proxy hosts"""
     try:
+        npm_service = get_npm_service()
         hosts = npm_service.get_proxy_hosts()
         return {
             "success": True,
@@ -281,10 +424,21 @@ async def create_service(
                 docker_service.remove_network(network_name)
             raise HTTPException(status_code=500, detail=str(e))
 
-        # Step 4: Create OVH DNS record
-        subdomain = f"{request.service_name}.{settings.ovh_zone_name}"
+        # Step 4: Create DNS record
+        dns_config = get_dns_config()
+        dns_service = get_dns_service()
+
+        # Get zone name based on provider
+        if dns_config['dns_provider'].lower() == "cloudflare":
+            cloudflare_service = get_cloudflare_service()
+            zone_info = cloudflare_service._get_zone_info()
+            zone_name = zone_info.get('name') if zone_info else dns_config['cloudflare_zone_id']
+        else:
+            zone_name = dns_config['ovh_zone_name']
+
+        subdomain = f"{request.service_name}.{zone_name}"
         try:
-            dns_record_id = ovh_service.create_a_record(
+            dns_record_id = dns_service.create_a_record(
                 subdomain=request.service_name,
                 target_ip=settings.server_public_ip
             )
@@ -296,6 +450,7 @@ async def create_service(
 
         # Step 5: Create NPM proxy host
         try:
+            npm_service = get_npm_service()
             npm_proxy_host_id = npm_service.create_proxy_host(
                 domain_name=subdomain,
                 forward_host=container_ip,
@@ -397,12 +552,14 @@ async def delete_service(service_name: str, db: Session = Depends(get_db)):
 
     # Cleanup NPM proxy host
     if service.npm_proxy_host_id:
+        npm_service = get_npm_service()
         if not npm_service.delete_proxy_host(service.npm_proxy_host_id):
             errors.append("Failed to remove NPM proxy host")
 
-    # Cleanup OVH DNS record
+    # Cleanup DNS record
     if service.dns_record_id:
-        if not ovh_service.delete_record(service.dns_record_id):
+        dns_service = get_dns_service()
+        if not dns_service.delete_record(service.dns_record_id):
             errors.append("Failed to remove DNS record")
 
     # Release subnet
@@ -421,10 +578,17 @@ async def delete_service(service_name: str, db: Session = Depends(get_db)):
 
 
 @app.delete("/api/dns/records/{record_id}")
-async def delete_dns_record(record_id: int):
-    """Delete a DNS record from OVH"""
+async def delete_dns_record(record_id: str):
+    """Delete a DNS record from configured DNS provider"""
     try:
-        success = ovh_service.delete_record(record_id)
+        dns_service = get_dns_service()
+        dns_config = get_dns_config()
+
+        # For OVH, convert to int
+        if dns_config['dns_provider'].lower() == "ovh":
+            record_id = int(record_id)
+
+        success = dns_service.delete_record(record_id)
         if success:
             return {
                 "success": True,
@@ -443,6 +607,7 @@ async def delete_dns_record(record_id: int):
 async def delete_npm_host(proxy_host_id: int):
     """Delete an NPM proxy host"""
     try:
+        npm_service = get_npm_service()
         success = npm_service.delete_proxy_host(proxy_host_id)
         if success:
             return {
@@ -456,6 +621,121 @@ async def delete_npm_host(proxy_host_id: int):
             )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/npm-config", response_model=NPMConfigResponse)
+async def get_npm_config_endpoint():
+    """Get current NPM configuration (password masked)"""
+    config = get_npm_config()
+    return NPMConfigResponse(
+        npm_url=config['npm_url'],
+        npm_email=config['npm_email'],
+        npm_password_masked="*" * 12
+    )
+
+
+@app.put("/api/admin/npm-config", response_model=ConfigUpdateResponse)
+async def update_npm_config(config: NPMConfigUpdateRequest):
+    """Update NPM configuration in database"""
+    db = SessionLocal()
+    try:
+        # Get or create NPM config
+        npm_config = db.query(NPMConfig).first()
+        if not npm_config:
+            npm_config = NPMConfig()
+            db.add(npm_config)
+
+        # Update configuration
+        npm_config.npm_url = config.npm_url
+        npm_config.npm_email = config.npm_email
+
+        # Only update password if new one provided
+        if config.npm_password:
+            npm_config.npm_password = config.npm_password
+
+        db.commit()
+
+        return ConfigUpdateResponse(
+            success=True,
+            message="NPM configuration updated successfully.",
+            requires_restart=False
+        )
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to update configuration: {str(e)}")
+    finally:
+        db.close()
+
+
+@app.get("/api/admin/dns-config", response_model=DNSConfigResponse)
+async def get_dns_config_endpoint():
+    """Get current DNS configuration (secrets masked)"""
+    def mask_secret(value: str) -> str:
+        if not value or len(value) == 0:
+            return ""
+        return "*" * 12
+
+    config = get_dns_config()
+
+    return DNSConfigResponse(
+        dns_provider=config['dns_provider'],
+        ovh_endpoint=config['ovh_endpoint'],
+        ovh_application_key=config['ovh_application_key'],
+        ovh_application_key_masked=mask_secret(config['ovh_application_key']),
+        ovh_application_secret_masked=mask_secret(config['ovh_application_secret']),
+        ovh_consumer_key_masked=mask_secret(config['ovh_consumer_key']),
+        ovh_zone_name=config['ovh_zone_name'],
+        cloudflare_api_token_masked=mask_secret(config['cloudflare_api_token']),
+        cloudflare_zone_id=config['cloudflare_zone_id']
+    )
+
+
+@app.put("/api/admin/dns-config", response_model=ConfigUpdateResponse)
+async def update_dns_config(config: DNSConfigUpdateRequest):
+    """Update DNS configuration in database"""
+    db = SessionLocal()
+    try:
+        # Get or create DNS config
+        dns_config = db.query(DNSConfig).first()
+        if not dns_config:
+            dns_config = DNSConfig()
+            db.add(dns_config)
+
+        # Update DNS provider
+        dns_config.dns_provider = config.dns_provider
+
+        # Update OVH fields (only if provided)
+        if config.ovh_endpoint is not None:
+            dns_config.ovh_endpoint = config.ovh_endpoint
+        if config.ovh_application_key is not None:
+            dns_config.ovh_application_key = config.ovh_application_key
+        if config.ovh_application_secret is not None:
+            dns_config.ovh_application_secret = config.ovh_application_secret
+        if config.ovh_consumer_key is not None:
+            dns_config.ovh_consumer_key = config.ovh_consumer_key
+        if config.ovh_zone_name is not None:
+            dns_config.ovh_zone_name = config.ovh_zone_name
+
+        # Update Cloudflare fields (only if provided)
+        if config.cloudflare_api_token is not None:
+            dns_config.cloudflare_api_token = config.cloudflare_api_token
+        if config.cloudflare_zone_id is not None:
+            dns_config.cloudflare_zone_id = config.cloudflare_zone_id
+
+        db.commit()
+
+        return ConfigUpdateResponse(
+            success=True,
+            message=f"DNS configuration updated successfully. Now using {config.dns_provider.upper()} provider.",
+            requires_restart=False
+        )
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to update DNS configuration: {str(e)}")
+    finally:
+        db.close()
 
 
 if __name__ == "__main__":
